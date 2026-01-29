@@ -37,7 +37,7 @@ export const postJob = async (req: TypedRequest, res: Response) => {
     });
 
     const room = `doer:${normalizedCategory}`;
-    console.log(`📢 Emitting job:new to room ${room}`);
+    console.log(`Emitting job:new to room ${room}`);
 
     req.io?.to(room).emit('job:new', {
       jobId: job.id,
@@ -97,20 +97,5 @@ export const closeJob = async (req: TypedRequest, res: Response) => {
 * Prisma was accessed directly inside route handlers
 * Error handling and validation were inconsistent
 
-The application was restructured into a layered architecture:
-
-src/
- ├── jobs/
- │   ├── jobs.controller.ts
- │   ├── jobs.service.ts
- │   ├── jobs.repository.ts
- │   ├── dto/
- │   │   └── create-job.dto.ts
- │   └── jobs.module.ts
- ├── prisma/
- │   └── prisma.service.ts
- ├── auth/
- │   ├── auth.guard.ts
- │   └── current-user.decorator.ts
- └── main.ts
+The application was restructured into a layered architecture
 
