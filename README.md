@@ -6,11 +6,12 @@ The goal of this refactor was not to change features, but to improve structure, 
 
 ## This is the original Express Structure....before refactoring
 
-
+//JobsController
 import { Response } from 'express';
 import { TypedRequest } from '../types/TypedRequest';
 import { Prisma, JobStatus } from '@prisma/client';
 import prisma from '../prismaClient';
+
 export const postJob = async (req: TypedRequest, res: Response) => {
   try {
     const { title, description, category, location, suggestedPrice } = req.body;
@@ -64,7 +65,6 @@ export const closeJob = async (req: TypedRequest, res: Response) => {
     if (!req.userId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
-
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const updated = await tx.job.updateMany({
         where: {
