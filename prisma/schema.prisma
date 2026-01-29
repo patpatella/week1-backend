@@ -28,6 +28,12 @@ model User {
   jobs            Job[]          @relation("PostedJobs")
 }
 
+model IdempotencyKey {
+  key        String   @id
+  response   Json
+  createdAt  DateTime @default(now())
+}
+
 
 model Job {
   id              String        @id @default(uuid())
@@ -36,6 +42,7 @@ model Job {
   status          JobStatus
   organizationId  String
   posterId        String
+  
 
   organization    Organization  @relation(fields: [organizationId], references: [id])
   poster          User          @relation("PostedJobs", fields: [posterId], references: [id])
