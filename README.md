@@ -1,133 +1,122 @@
-# Backend Foundations — Week 1
+## Refactoring an Express Backend to NestJS
 
-## Overview
+This project demonstrates the refactoring of an Express.js file into a NestJS application following clean architecture and production-ready backend practices.
 
-This repository contains the Week 1 work of a production-focused backend engineering program. The goal of this week was not feature velocity, but **building the correct mental models and technical foundations** required to design, scale, and maintain real-world backend systems.
+The goal of this refactor was not to change features, but to improve structure, type safety, maintainability, and scalability by introducing clear separation of concerns and leveraging NestJS’s architectural patterns.
 
-The project is intentionally structured to mirror how backend systems are built and operated in production environments — with strong type safety, clear architectural boundaries, correct relational data modeling, and defensive API design.
+## This is the original Express Structure....before refactoring
 
----
+//JobsController
+import { Response } from 'express';
+import { TypedRequest } from '../types/TypedRequest';
+import { Prisma, JobStatus } from '@prisma/client';
+import prisma from '../prismaClient';
 
-## Core Principles
+export const postJob = async (req: TypedRequest, res: Response) => {
+  try {
+    const { title, description, category, location, suggestedPrice } = req.body;
 
-This codebase was built around the following principles:
+    if (!req.userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
 
-* **Type safety first** — Types are treated as a core design tool, not an afterthought
-* **Clear separation of concerns** — Controllers, services, repositories, and infrastructure are strictly separated
-* **Production-minded architecture** — Design decisions consider scaling, failure modes, and maintainability
-* **Data integrity over convenience** — Relational constraints, transactions, and indexes are intentional
-* **Defensive APIs** — Validation, error modeling, and idempotency are implemented from day one
+    const normalizedCategory = category?.toLowerCase() || 'general';
 
----
+    const job = await prisma.job.create({
+      data: {
+        posterId: req.userId,
+        title,
+        description,
+        category: normalizedCategory,
+        suggestedPrice,
+        locationLat: location?.lat ?? null,
+        locationLon: location?.lon ?? null,
+        locationAddress: location?.address ?? null,
+        status: JobStatus.open,
+      },
+    });
 
-## Tech Stack
+    const room = `doer:${normalizedCategory}`;
+    console.log(`📢 Emitting job:new to room ${room}`);
 
-* **TypeScript** (strict mode enabled)
-* **NestJS** — modular, scalable backend framework
-* **Prisma** — database access with explicit schema modeling
-* **PostgreSQL** — relational database (designed for scale)
-* **class-validator / class-transformer** — request validation
+    req.io?.to(room).emit('job:new', {
+      jobId: job.id,
+      title: job.title,
+      category: job.category,
+      location: {
+        lat: job.locationLat,
+        lon: job.locationLon,
+        address: job.locationAddress,
+      },
+      suggestedPrice: job.suggestedPrice,
+    });
 
----
+    return res.status(201).json({ jobId: job.id });
+  } catch (err) {
+    console.error('postJob error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
 
-## Architecture Overview
+export const closeJob = async (req: TypedRequest, res: Response) => {
+  try {
+    const { jobId } = req.body;
 
-The application follows a layered architecture with clearly defined responsibilities:
+    if (!req.userId) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
 
-```
-Controller  ->  Service  ->  Repository  ->  Database
-     |            |             |
- Validation   Business Logic   Data Access
-```
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const updated = await tx.job.updateMany({
+        where: {
+          id: jobId,
+          posterId: req.userId,
+          status: JobStatus.open,
+        },
+        data: { status: JobStatus.completed },
+      });
+      return updated.count > 0;
+    });
 
-### Key Architectural Decisions
+    if (!result) {
+      return res.status(404).json({ error: 'Job not found or not open' });
+    }
 
-* Controllers contain **no business logic**
-* Services contain **domain and business rules only**
-* Repositories encapsulate **all database access**
-* Prisma never leaks outside the repository layer
-* DTOs are separated from domain models
-* Infrastructure concerns (auth, idempotency, logging) are handled via guards, interceptors, and filters
+    req.io?.to(`doer:*`).emit('job:closed', { jobId });
 
----
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('closeJob error:', err);
+    return res.status(500).json({ error: 'Server error' });
+  }
+};
 
-## Domain Modeling
 
-The system models a multi-tenant backend domain with the following core entities:
+## Problems I noticed:
 
-* **User** — authenticated system actor
-* **Organization** — tenant boundary
-* **Task / Job** — unit of work owned by an organization
+* Controllers handled HTTP logic, business logic, and database access
+* req and res objects were passed deep into the application
+* Prisma was accessed directly inside route handlers
+* Error handling and validation were inconsistent
 
-Relational modeling decisions include:
+The application was restructured into a layered architecture:
 
-* Explicit foreign key constraints
-* Indexed query paths based on access patterns
-* Transaction boundaries for write safety
-* Avoidance of JSON blobs for relational data
+src/
+ ├── jobs/
+ │   ├── jobs.controller.ts
+ │   ├── jobs.service.ts
+ │   ├── jobs.repository.ts
+ │   ├── dto/
+ │   │   └── create-job.dto.ts
+ │   └── jobs.module.ts
+ ├── prisma/
+ │   └── prisma.service.ts
+ ├── auth/
+ │   ├── auth.guard.ts
+ │   └── current-user.decorator.ts
+ └── main.ts
 
----
 
-## TypeScript Strategy
+Database connections
 
-TypeScript is used as a **design tool**, not just a compiler:
-
-* Strict mode enabled (`strict: true`)
-* No `any` in core logic
-* Domain types separated from transport (DTO) types
-* Type narrowing and utility types used deliberately
-* Compile-time safety paired with runtime validation
-
----
-
-## API Design
-
-The API follows production-grade REST principles:
-
-* Clear resource modeling (not CRUD dumping)
-* Consistent request/response contracts
-* Explicit error modeling using HTTP semantics
-* Validation occurs before business logic execution
-
-### Idempotency
-
-Write endpoints support idempotency via an application-level interceptor:
-
-* Clients may safely retry requests
-* Duplicate writes are prevented
-* Business logic remains deterministic
-* Infrastructure concerns are isolated from services
-
----
-
-## Performance & Reliability Considerations
-
-Even at an early stage, the system accounts for:
-
-* Index selection based on query patterns
-* Transaction safety for concurrent operations
-* Connection pooling awareness
-* Detection of potential N+1 query patterns
-* Understanding of read vs write trade-offs
-
----
-
-## What This Repository Represents
-
-This is **not** a tutorial project.
-
-It represents:
-
-* A production-oriented backend foundation
-* Correct architectural habits formed early
-* An understanding of how small design decisions scale into real-world consequences
-
-This repository serves as a baseline for future weeks, where additional concerns such as caching, async processing, observability, and system hardening will be layered on top.
-
----
-
-## Status
-
-Week 1 complete.
-
-Subsequent weeks will build on this foundation rather than rewrite it.
+Cross-cutting concerns
